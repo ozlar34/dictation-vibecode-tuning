@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+# A/B harness output
+voiceink-ab-*/
+results.json
+report.md
+# patch-script backups
+vibe-prompt-before-*.txt
