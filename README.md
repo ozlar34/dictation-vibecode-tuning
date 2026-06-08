@@ -127,7 +127,29 @@ enhancement model "helpfully" reducing a sentence to the command embedded in it.
 The fix is the explicit Lists rule in v3.5: *"never reduce an item to an embedded
 command, flag, or path... keep the surrounding prose."*
 
-<!-- VETTED-PAIRS: additional real RAW→ENHANCED examples go here once eyeballed -->
+Two more real pairs from the loop, one per layer:
+
+**Enhancement divergence — over-compression (a v3.5 weakness, kept here honestly):**
+
+```
+RAW:       I'm reading a tweet about Opus 4.8 and there are some prompts example prompts in it to that I want to save somewhere.
+ENHANCED:  Save the prompt examples from the tweet about Opus 4.8 somewhere.
+```
+
+STT heard every word. The enhancement model turned an observation ("I'm reading
+... that I want to save") into a bare imperative and dropped content. This is the
+layer prompt tuning targets — and a reminder that "cleanup" and "rewrite" sit on
+a spectrum the model doesn't always get right.
+
+**Correct — cleanup done right (layer 3):**
+
+```
+RAW:       If my obsidian inbox keeps getting full ... check on my inbox and and then in the morning ... discard them, you know, something like that.
+ENHANCED:  ... check on my inbox and then in the morning ... discard them, something like that.
+```
+
+The doubled "and and" collapsed, the "you know" filler dropped, and nothing
+substantive lost. This is what the enhancement pass is *for*.
 
 ---
 
