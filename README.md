@@ -33,7 +33,37 @@ scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs E
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the Ollama layer
 launchagents/                  the OLLAMA_KEEP_ALIVE LaunchAgent (the latency fix)
 examples/                      illustrative: patching the prompt programmatically
+docs/architecture.png          pipeline & tuning system diagram
 ```
+
+## Pipeline
+
+![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4:e4b with the Vibe Coding v3.5 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
+
+<details>
+<summary>Text version</summary>
+
+```
+[VoiceInk (audio capture)]   [LaunchAgent: OLLAMA_KEEP_ALIVE 1h]
+          │                              │
+          └──────────────┬───────────────┘
+                         ▼
+              [Layer 1 — STT: Parakeet V2]
+                on-device · ~0.09s
+                → RAW transcript
+                         │
+                         ▼
+          [Layer 2 — Enhancement: gemma4:e4b]   ◄── voiceink-model-ab.py
+              Ollama · local · Vibe Coding v3.5       (A/B harness)
+                → ENHANCED text
+                         │
+                         ▼
+              [Layer 3 — Review]
+              voiceink-review.py
+              RAW vs ENHANCED · 3-layer miss taxonomy
+```
+
+</details>
 
 ---
 
