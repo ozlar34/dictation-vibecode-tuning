@@ -1,3 +1,5 @@
+![dictation-vibecode-tuning — empirical tuning log for a fully-local voice-coding pipeline](docs/banner.png)
+
 # dictation-vibecode-tuning
 
 Tuning a **fully-local** dictation pipeline — on-device speech-to-text plus a
