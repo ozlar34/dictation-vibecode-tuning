@@ -21,7 +21,7 @@ are the point.
 |---|---|---|
 | Speech-to-text | Parakeet V2 (`parakeet-tdt-0.6b-v2`), on-device | ~0.09s, effectively free, never the bottleneck |
 | Enhancement | Ollama `gemma4:e4b`, local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
-| Enhancement prompt | custom **"Vibe Coding"** v3.5, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
+| Enhancement prompt | custom **"Vibe Coding"** v3.6, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
 
 Everything runs on-device. No API keys, no per-token cost, no audio or text
 leaving the machine — which is the whole reason for doing the enhancement with a
@@ -30,10 +30,10 @@ local model instead of a cloud one.
 ## What's in here
 
 ```
-prompt/vibe-coding.md          the tuned v3.5 enhancement prompt + extract script
+prompt/vibe-coding.md          the tuned v3.6 enhancement prompt + extract script
 scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs ENHANCED pairs
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the Ollama layer
-launchagents/                  the OLLAMA_KEEP_ALIVE LaunchAgent (the latency fix)
+launchagents/                  LaunchAgent setting OLLAMA_KEEP_ALIVE + OLLAMA_MAX_LOADED_MODELS
 examples/                      illustrative: patching the prompt programmatically
 docs/architecture.png          pipeline & tuning system diagram
 ```
@@ -120,14 +120,21 @@ layer. STT (Parakeet) is ~0.09s and never the problem. The felt stall is the
 enhancement model **cold-loading**: `gemma4:e4b` (9.6 GB) unloads on Ollama's
 idle timeout and reloads (3-10s) on the first dictation after a gap.
 
-The fix is one environment variable, not a smaller model:
+Two environment variables fix it, not a smaller model:
 
 ```
 launchctl setenv OLLAMA_KEEP_ALIVE 1h
+launchctl setenv OLLAMA_MAX_LOADED_MODELS 2
 ```
 
-(Shipped as a LaunchAgent in [`launchagents/`](launchagents/) so it survives
-reboots.) Pinned warm, enhancement is sub-second.
+`OLLAMA_KEEP_ALIVE=1h` pins `gemma4:e4b` in memory so it never cold-loads
+between dictations. `OLLAMA_MAX_LOADED_MODELS=2` lets a second model (e.g., a
+local assistant or agent) coexist without evicting the enhancement model — by
+default Ollama keeps only one model resident, so any other `generate` call would
+flush e4b and force a 3-10s reload on the next dictation.
+
+(Both shipped as a LaunchAgent in [`launchagents/`](launchagents/) so they
+survive reboots.) Pinned warm, enhancement is sub-second.
 
 ### 4. ...and a smaller model is the *wrong* fix for latency
 
@@ -151,17 +158,17 @@ command:
 ```
 RAW:       Can you run slash clear, then show me the git status?
 BROKEN:    /clear
-v3.5:      Can you run /clear, then show me the git status?
+v3.6:      Can you run /clear, then show me the git status?
 ```
 
 The first output isn't a transcription miss — STT heard every word. It's the
 enhancement model "helpfully" reducing a sentence to the command embedded in it.
-The fix is the explicit Lists rule in v3.5: *"never reduce an item to an embedded
+The fix is the explicit Lists rule in v3.6: *"never reduce an item to an embedded
 command, flag, or path... keep the surrounding prose."*
 
 Two more real pairs from the loop, one per layer:
 
-**Enhancement divergence — over-compression (a v3.5 weakness, kept here honestly):**
+**Enhancement divergence — over-compression (a v3.5 weakness targeted by the v3.6 Prose rule):**
 
 ```
 RAW:       I'm reading a tweet about Opus 4.8 and there are some prompts example prompts in it to that I want to save somewhere.
