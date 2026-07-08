@@ -20,7 +20,7 @@ are the point.
 | Layer | Choice | Why |
 |---|---|---|
 | Speech-to-text | Parakeet V2 (`parakeet-tdt-0.6b-v2`), on-device | ~0.09s, effectively free, never the bottleneck |
-| Enhancement | Ollama `gemma4:e4b`, local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
+| Enhancement | `gemma4-e4b` on a dedicated **llama-server** (llama.cpp), local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
 | Enhancement prompt | custom **"Vibe Coding"** v3.6, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
 
 Everything runs on-device. No API keys, no per-token cost, no audio or text
@@ -32,21 +32,23 @@ local model instead of a cloud one.
 ```
 prompt/vibe-coding.md          the tuned v3.6 enhancement prompt + extract script
 scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs ENHANCED pairs
-scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the Ollama layer
-launchagents/                  LaunchAgent setting OLLAMA_KEEP_ALIVE + OLLAMA_MAX_LOADED_MODELS
-examples/                      illustrative: patching the prompt programmatically
+scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the enhancement layer
+launchagents/                  LaunchAgent running the dedicated, always-resident llama-server
+examples/                      illustrative: applying a new prompt programmatically
 docs/architecture.png          pipeline & tuning system diagram
 ```
 
 ## Pipeline
 
-![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4:e4b with the Vibe Coding v3.5 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
+![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.6 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
+
+> **Note:** `docs/architecture.png` still shows the earlier Ollama-based backend; the text diagram below and the findings reflect the current dedicated-llama-server setup.
 
 <details>
 <summary>Text version</summary>
 
 ```
-[VoiceInk (audio capture)]   [LaunchAgent: OLLAMA_KEEP_ALIVE 1h]
+[VoiceInk (audio capture)]   [LaunchAgent: dedicated llama-server, always resident]
           │                              │
           └──────────────┬───────────────┘
                          ▼
@@ -55,8 +57,8 @@ docs/architecture.png          pipeline & tuning system diagram
                 → RAW transcript
                          │
                          ▼
-          [Layer 2 — Enhancement: gemma4:e4b]   ◄── voiceink-model-ab.py
-              Ollama · local · Vibe Coding v3.5       (A/B harness)
+          [Layer 2 — Enhancement: gemma4-e4b]   ◄── voiceink-model-ab.py
+              llama-server · local · Vibe Coding v3.6   (A/B harness)
                 → ENHANCED text
                          │
                          ▼
@@ -90,60 +92,72 @@ transcript (`ZTEXT`) and the ENHANCED output (`ZENHANCEDTEXT`) side by side from
 the store, so every judgment call starts from "did the model mishear it, or did
 the prompt mangle it?" Tuning without that split means guessing.
 
-### 2. The bigger enhancement model was a dead end (and not for the obvious reason)
+### 2. The thinking-token trap — and why it drove the backend choice
 
-The intuitive move — "use a larger model for better cleanup" — fails for
-`gemma4:12b`, for three independent reasons, only one of which is the one people
-assume:
+Every `gemma4` model is a *thinking* model: left to itself it silently generates
+reasoning tokens before every reply. For a dictation-enhancement pass that is
+pure overhead — you wait seconds for "thinking" you never see, and some serving
+paths return *empty* visible content entirely.
 
-- **It's a thinking model that returns *empty* content** unless the request sends
-  `think:false`. VoiceInk's request doesn't include that flag and offers no
-  toggle ([open feature request #589](https://github.com/Beingpax/VoiceInk/issues/589)).
-- **It can't be salvaged with a derived model.** On Ollama 0.30.6 a non-thinking
-  variant isn't bakeable via Modelfile — the `gemma4` renderer is auto-assigned
-  from the architecture and un-removable, and `PARAMETER think false` is rejected.
-- **It doesn't even win on quality.** An n=20 offline A/B put 12b near-even with
-  e4b (9 ties / 5 each / 1 toss-up). Its *losses* were correctness-level: on
-  natural-language dictation it over-renders prose into symbols (the spoken words
-  "slash commands" / "dash" become `/commands` / `--`) and invents punctuation.
-  Its wins were only nice-to-haves (kept list digits, normalized identifiers).
-  And it runs ~1.6x slower.
+The trap is that **it isn't fixable at the app layer.** VoiceInk sends no
+`think:false` and offers no toggle ([open feature request
+#589](https://github.com/Beingpax/VoiceInk/issues/589)), and on Ollama a
+non-thinking variant can't be baked out via Modelfile (on 0.30.6 the `gemma4`
+renderer is auto-assigned from the architecture and un-removable, and
+`PARAMETER think false` is rejected). This is a large part of why enhancement
+moved onto a **dedicated llama-server**: there, `--reasoning off` suppresses the
+thinking tokens *server-side and unconditionally*, independent of what the app
+sends. (Careful: the per-request `--chat-template-kwargs {"thinking":false}`
+does **not** stop generation — it only reroutes the tokens to
+`reasoning_content`. You need `--reasoning off`.) This applies to `gemma4-e4b`
+itself, not just the big model — it's what makes the whole gemma4 path usable.
 
-So the small model isn't a compromise — for this task it's the *correct* choice,
-and the experiment is what proved it rather than assumed it. (`gemma4:12b` is
-parked until #589 ships.)
+With thinking handled, is a *bigger* model worth it? No. An n=20 offline A/B put
+`gemma4:12b` near-even with e4b (9 ties / 5 each / 1 toss-up). Its *losses* were
+correctness-level: on natural-language dictation it over-renders prose into
+symbols (the spoken words "slash commands" / "dash" become `/commands` / `--`)
+and invents punctuation. Its wins were only nice-to-haves (kept list digits,
+normalized identifiers). And it runs ~1.6x slower. So the small model isn't a
+compromise — for this task it's the *correct* choice, and the experiment is what
+proved it rather than assumed it.
 
-### 3. The latency you feel is cold-load, not inference
+### 3. The latency you feel isn't inference — and on a dedicated server it isn't idle-unload either
 
 If local dictation feels slow, the instinct is "the model is too big." Wrong
-layer. STT (Parakeet) is ~0.09s and never the problem. The felt stall is the
-enhancement model **cold-loading**: `gemma4:e4b` (9.6 GB) unloads on Ollama's
-idle timeout and reloads (3-10s) on the first dictation after a gap.
+layer. STT (Parakeet) is ~0.09s and never the problem, and warm enhancement is
+~0.40s.
 
-Two environment variables fix it, not a smaller model:
+On an Ollama backend the felt stall was a **cold-load**: the model unloaded on
+Ollama's idle timeout and reloaded (3-10s) on the first dictation after a gap.
+Running enhancement on a **dedicated llama-server** removes that failure mode
+outright — llama-server holds the model (`gemma-4-E4B-it-Q4_K_M.gguf`, 4.6 GB on
+disk) resident indefinitely, with no idle TTL. What's left are three narrower
+causes:
 
-```
-launchctl setenv OLLAMA_KEEP_ALIVE 1h
-launchctl setenv OLLAMA_MAX_LOADED_MODELS 2
-```
+- **Sleep/swap re-fault.** After the machine sleeps, the mmap'd weights get paged
+  out; the first post-wake dictation re-faults them from disk. Fix: `--mlock`,
+  which pins the weights in RAM so they survive sleep/wake.
+- **Decode-bound long outputs.** At ~70 tok/s a 200+ token cleanup is genuinely
+  3-4s of generation — not a load stall, just work. Shorter is faster.
+- **Prefix-cache misses.** Injecting variable context *before* the stable system
+  prompt busts the prefix cache; keep the long, fixed Vibe Coding prompt first.
 
-`OLLAMA_KEEP_ALIVE=1h` pins `gemma4:e4b` in memory so it never cold-loads
-between dictations. `OLLAMA_MAX_LOADED_MODELS=2` lets a second model (e.g., a
-local assistant or agent) coexist without evicting the enhancement model — by
-default Ollama keeps only one model resident, so any other `generate` call would
-flush e4b and force a 3-10s reload on the next dictation.
-
-(Both shipped as a LaunchAgent in [`launchagents/`](launchagents/) so they
-survive reboots.) Pinned warm, enhancement is sub-second.
+The other half is **isolation**: run enhancement on its own llama-server on its
+own port (`:11435`), separate from any swap-on-demand pool (e.g. llama-swap on
+`:11434`). Then no other model request can ever evict the enhancement model —
+the same insight the old `OLLAMA_MAX_LOADED_MODELS=2` was reaching for, made
+structural. (Shipped as a LaunchAgent in [`launchagents/`](launchagents/) so it
+survives reboots.)
 
 ### 4. ...and a smaller model is the *wrong* fix for latency
 
 The tempting shortcut to "fix" the stall — drop to `gemma4:e2b` — was tested and
 rejected. e2b is ~1.7x faster *per token*, but: (a) that speedup is invisible
-once the model is warm, (b) it does nothing for the cold-load problem (the only
-latency you actually feel), and (c) it drops clauses and corrupts numbers. The
-right lever was keeping e4b warm, not trading accuracy for a speedup you can't
-perceive. `scripts/voiceink-model-ab.py` is the harness that measured this —
+once the model is resident, (b) it does nothing for the stalls you actually feel
+(sleep re-fault, long-output decode — see finding 3), and (c) it drops clauses
+and corrupts numbers. The right lever was keeping e4b resident and `--mlock`'d,
+not trading accuracy for a speedup you can't perceive.
+`scripts/voiceink-model-ab.py` is the harness that measured this —
 cold-load vs warm latency and tokens/sec per model, over a fixed set of real
 rows, with the live prompt held constant so the model is the only variable.
 
@@ -194,12 +208,15 @@ substantive lost. This is what the enhancement pass is *for*.
 
 ## Reproducing this for your own setup
 
-1. Install VoiceInk, set Parakeet V2 for transcription and Ollama for
-   enhancement (`http://localhost:11434`).
+1. Install VoiceInk and set Parakeet V2 for transcription. For enhancement, run a
+   local **llama-server** serving `gemma4-e4b` (start it with `--reasoning off`
+   and `--mlock` — see finding 2 and 3), and point VoiceInk's **Custom** provider
+   at `http://127.0.0.1:11435/v1/chat/completions` (model name `gemma4-e4b`).
 2. Paste [`prompt/vibe-coding.md`](prompt/vibe-coding.md)'s prompt into a custom
    enhancement prompt, with **"Use System Template" OFF**.
-3. Pin the enhancement model warm with the LaunchAgent in
-   [`launchagents/`](launchagents/).
+3. Run the enhancement server as a LaunchAgent (see
+   [`launchagents/`](launchagents/)) so it stays resident across reboots, on its
+   own port isolated from any other model pool.
 4. To run the review loop: `python3 scripts/voiceink-review.py status` (config via
    env vars — see the script header).
 5. To A/B two models: `python3 scripts/voiceink-model-ab.py model-a model-b`

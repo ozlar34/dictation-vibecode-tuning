@@ -1,37 +1,42 @@
 #!/usr/bin/env python3
-"""voiceink-review.py — read-only reader of VoiceInk's SwiftData store for a
-prompt-refinement loop. Pulls the RAW transcript (ZTEXT) and the ENHANCED output
-(ZENHANCEDTEXT) side by side so you can separate a transcription miss (the STT
-model heard it wrong) from an enhancement-prompt divergence (the LLM rewrote it).
+"""voiceink-review.py — read-only reader of VoiceInk's SwiftData store for the
+permanent /voiceink-review loop. Pulls the RAW transcript (ZTEXT) and the
+ENHANCED output (ZENHANCEDTEXT) side by side so the /voiceink-review command can
+separate a Parakeet transcription miss (STT heard it wrong) from an
+enhancement-prompt divergence (the LLM rewrote it).
 
-Never writes the store. The only state it owns is a small sentinel JSON.
+Never writes the store. The only state it owns is the sentinel JSON below, which
+tracks the timestamp of the last reviewed dictation ("since you last ran it").
 
 Subcommands:
-  nudge        one-line nudge when unreviewed pairs exist; silent otherwise.
-               After the window closes, one closeout line, then silent.
-  show         dump all unreviewed pairs (RAW vs ENHANCED) for judging.
-  status       counts: in-window / reviewed / unreviewed / days left.
-  ack [TS]     mark reviewed up to TS (core-data float). No arg = latest in window.
+  json  [--days N]   unreviewed pairs since last ack, as JSON (what the command reads).
+  show  [--days N]   same pairs, human-readable.
+  status             counts: total / reviewed / unreviewed, and last-ack time.
+  ack   [TS]         mark reviewed up to TS (core-data float). No arg = latest pair.
 
-Config via env (all optional — defaults reflect the reference experiment):
-  VOICEINK_STORE           path to default.store
-  VOICEINK_REVIEW_STATE    path to the sentinel JSON
-  VOICEINK_PROMPT_SCOPE    ZPROMPTNAME to filter on        (default "Vibe Coding")
-  VOICEINK_WINDOW_START    YYYY-MM-DD review-window start
-  VOICEINK_WINDOW_END      YYYY-MM-DD review-window end (inclusive)
-  VOICEINK_MODEL           label for the live enhancement model
-  VOICEINK_PROMPT_VERSION  label for the prompt version
+--days N caps the lookback to the last N days (use on a first run, when there is
+no ack yet, to avoid dumping the entire history). When an ack exists, the review
+window is always "newer than the last ack" — --days only tightens it further.
 
 NOTE ON MODEL LABEL: VoiceInk's store column ZAIENHANCEMENTMODELNAME can be STALE
 — it records the capital-O plist key while the actual Ollama call uses the
 lowercase key. Don't trust the store's model column; the env VOICEINK_MODEL is
-the label of record. Ground truth for what ran is ~/.ollama/logs/server.log.
+the label of record. Ground truth for what ran is the llama-server logs at
+~/Library/Logs/com.user.voiceink-llm.{out,err} (Ollama retired 2026-06).
+
+Config via env (all optional):
+  VOICEINK_STORE           path to default.store
+  VOICEINK_REVIEW_STATE    path to the sentinel JSON
+  VOICEINK_PROMPT_SCOPE    ZPROMPTNAME to filter on   (default "Vibe Coding")
+  VOICEINK_MODEL           label for the live enhancement model
+  VOICEINK_PROMPT_VERSION  label for the prompt version
 """
+import argparse
 import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 STORE = os.path.expanduser(
     os.environ.get(
@@ -43,28 +48,9 @@ SENTINEL = os.path.expanduser(
     os.environ.get("VOICEINK_REVIEW_STATE", "~/.voiceink-review.json")
 )
 PROMPT_SCOPE = os.environ.get("VOICEINK_PROMPT_SCOPE", "Vibe Coding")
-CORE_DATA_EPOCH = 978307200  # seconds between 1970-01-01 and 2001-01-01
-
-# --- review-window defaults (the reference refinement week) ----------------
-WINDOW_START = os.environ.get("VOICEINK_WINDOW_START", "2026-06-07")
-WINDOW_END = os.environ.get("VOICEINK_WINDOW_END", "2026-06-14")  # inclusive
 LIVE_MODEL = os.environ.get("VOICEINK_MODEL", "gemma4:e4b")
-PROMPT_VERSION = os.environ.get("VOICEINK_PROMPT_VERSION", "v3.5")
-
-
-def _day_bounds(date_str):
-    """Local-midnight unix bounds for a YYYY-MM-DD date."""
-    d = datetime.strptime(date_str, "%Y-%m-%d")
-    start = d.timestamp()
-    end = (d + timedelta(days=1)).timestamp()
-    return start, end
-
-
-def window_core_bounds():
-    """Window start/end as core-data timestamps (what ZTIMESTAMP stores)."""
-    start_unix, _ = _day_bounds(WINDOW_START)
-    _, end_unix = _day_bounds(WINDOW_END)
-    return start_unix - CORE_DATA_EPOCH, end_unix - CORE_DATA_EPOCH
+PROMPT_VERSION = os.environ.get("VOICEINK_PROMPT_VERSION", "v3.6")
+CORE_DATA_EPOCH = 978307200  # seconds between 1970-01-01 and 2001-01-01
 
 
 def load_sentinel():
@@ -75,13 +61,10 @@ def load_sentinel():
         except (json.JSONDecodeError, OSError):
             pass
     return {
-        "window_start": WINDOW_START,
-        "window_end": WINDOW_END,
         "model": LIVE_MODEL,
         "prompt_version": PROMPT_VERSION,
         "last_ack_ts": 0.0,
         "last_ack_iso": None,
-        "closeout_nudged": False,
     }
 
 
@@ -96,7 +79,7 @@ def save_sentinel(d):
 def connect_ro():
     if not os.path.exists(STORE):
         sys.stderr.write(f"voiceink-review: store not found at {STORE}\n")
-        sys.exit(0)  # never break a hook
+        sys.exit(0)
     return sqlite3.connect(f"file:{STORE}?mode=ro", uri=True)
 
 
@@ -104,70 +87,72 @@ def to_local(core_ts):
     return datetime.fromtimestamp(core_ts + CORE_DATA_EPOCH)
 
 
+def effective_since(sentinel, days):
+    """Floor of the review window as a core-data timestamp: newer than the last
+    ack, and (if --days given) no older than N days ago."""
+    since = sentinel.get("last_ack_ts", 0.0)
+    if days is not None:
+        cutoff_core = datetime.now().timestamp() - days * 86400 - CORE_DATA_EPOCH
+        since = max(since, cutoff_core)
+    return since
+
+
 def query_pairs(since_ts):
-    """Enhancement pairs inside the window, newer than since_ts."""
-    start_core, end_core = window_core_bounds()
+    """Vibe-Coding enhancement pairs newer than since_ts (no upper bound)."""
     conn = connect_ro()
     try:
         rows = conn.execute(
             """
-            SELECT ZTIMESTAMP, ZTEXT, ZENHANCEDTEXT, ZAIENHANCEMENTMODELNAME,
-                   ZPOWERMODENAME
+            SELECT ZTIMESTAMP, ZTEXT, ZENHANCEDTEXT, ZPOWERMODENAME
             FROM ZTRANSCRIPTION
             WHERE ZPROMPTNAME = ?
               AND ZENHANCEDTEXT IS NOT NULL
               AND ZTEXT IS NOT NULL
-              AND ZTIMESTAMP >= ? AND ZTIMESTAMP < ?
               AND ZTIMESTAMP > ?
             ORDER BY ZTIMESTAMP ASC
             """,
-            (PROMPT_SCOPE, start_core, end_core, since_ts),
+            (PROMPT_SCOPE, since_ts),
         ).fetchall()
     finally:
         conn.close()
     return rows
 
 
-def days_left():
-    _, end_unix = _day_bounds(WINDOW_END)
-    return max(0, int((end_unix - datetime.now().timestamp()) // 86400))
-
-
-def past_window():
-    _, end_unix = _day_bounds(WINDOW_END)
-    return datetime.now().timestamp() >= end_unix
-
-
-def cmd_nudge():
+def cmd_json(days):
     s = load_sentinel()
-    if past_window():
-        if not s.get("closeout_nudged"):
-            print(
-                "🎙️ VoiceInk review window is over — run a final review pass, "
-                "then tear down the loop."
-            )
-            s["closeout_nudged"] = True
-            save_sentinel(s)
-        return
-    pairs = query_pairs(s.get("last_ack_ts", 0.0))
-    if pairs:
-        print(
-            f"🎙️ VoiceInk: {len(pairs)} unreviewed dictation(s) on {LIVE_MODEL} "
-            f"+ {PROMPT_VERSION} ({days_left()}d left in the review window)."
-        )
+    pairs = query_pairs(effective_since(s, days))
+    out = {
+        "prompt_scope": PROMPT_SCOPE,
+        "model": LIVE_MODEL,
+        "prompt_version": PROMPT_VERSION,
+        "last_ack_ts": s.get("last_ack_ts", 0.0),
+        "last_ack_iso": s.get("last_ack_iso"),
+        "count": len(pairs),
+        "pairs": [
+            {
+                "ts": ts,
+                "when": to_local(ts).strftime("%Y-%m-%d %H:%M"),
+                "raw": raw.strip(),
+                "enhanced": enh.strip(),
+                "mode": pmode or None,
+            }
+            for (ts, raw, enh, pmode) in pairs
+        ],
+    }
+    print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
-def cmd_show():
+def cmd_show(days):
     s = load_sentinel()
-    pairs = query_pairs(s.get("last_ack_ts", 0.0))
+    pairs = query_pairs(effective_since(s, days))
     if not pairs:
-        print(f"No unreviewed {PROMPT_SCOPE} dictations in the window.")
+        print(f"No unreviewed {PROMPT_SCOPE} dictations since last ack.")
         return
     print(
         f"# Unreviewed VoiceInk pairs — {len(pairs)} (live model: {LIVE_MODEL} "
         f"+ {PROMPT_VERSION}; store model column may be STALE, ignore it)\n"
     )
-    for i, (ts, raw, enh, store_model, pmode) in enumerate(pairs, 1):
+    for i, (ts, raw, enh, pmode) in enumerate(pairs, 1):
         when = to_local(ts).strftime("%Y-%m-%d %H:%M")
         print(f"## Pair {i} — {when}  (ts={ts:.6f}, mode={pmode or '-'})")
         print(f"RAW:      {raw.strip()}")
@@ -178,15 +163,13 @@ def cmd_show():
 
 def cmd_status():
     s = load_sentinel()
-    all_pairs = query_pairs(0.0)
-    unreviewed = query_pairs(s.get("last_ack_ts", 0.0))
-    print(f"window:     {WINDOW_START} → {WINDOW_END}  ({days_left()}d left)")
+    total = len(query_pairs(0.0))
+    unreviewed = len(query_pairs(s.get("last_ack_ts", 0.0)))
     print(f"live model: {LIVE_MODEL} + {PROMPT_VERSION}")
-    print(f"in window:  {len(all_pairs)} pairs")
-    print(f"reviewed:   {len(all_pairs) - len(unreviewed)}")
-    print(f"unreviewed: {len(unreviewed)}")
-    if s.get("last_ack_iso"):
-        print(f"last ack:   {s['last_ack_iso']}")
+    print(f"total:      {total} Vibe Coding pairs in store")
+    print(f"reviewed:   {total - unreviewed}")
+    print(f"unreviewed: {unreviewed}")
+    print(f"last ack:   {s.get('last_ack_iso') or '(never)'}")
 
 
 def cmd_ack(arg):
@@ -201,19 +184,33 @@ def cmd_ack(arg):
         ts = pairs[-1][0]
     s["last_ack_ts"] = ts
     s["last_ack_iso"] = to_local(ts).strftime("%Y-%m-%d %H:%M:%S")
+    s["model"] = LIVE_MODEL
+    s["prompt_version"] = PROMPT_VERSION
     save_sentinel(s)
     print(f"Acked through {s['last_ack_iso']} (ts={ts:.6f}).")
 
 
 def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "nudge"
-    arg = sys.argv[2] if len(sys.argv) > 2 else None
-    {
-        "nudge": cmd_nudge,
-        "show": cmd_show,
-        "status": cmd_status,
-        "ack": lambda: cmd_ack(arg),
-    }.get(cmd, cmd_nudge)()
+    p = argparse.ArgumentParser(prog="voiceink-review.py")
+    sub = p.add_subparsers(dest="cmd")
+    for name in ("json", "show"):
+        sp = sub.add_parser(name)
+        sp.add_argument("--days", type=int, default=None)
+    sub.add_parser("status")
+    sp = sub.add_parser("ack")
+    sp.add_argument("ts", nargs="?", default=None)
+    args = p.parse_args()
+
+    if args.cmd == "json":
+        cmd_json(args.days)
+    elif args.cmd == "show":
+        cmd_show(args.days)
+    elif args.cmd == "status":
+        cmd_status()
+    elif args.cmd == "ack":
+        cmd_ack(args.ts)
+    else:
+        p.print_help()
 
 
 if __name__ == "__main__":

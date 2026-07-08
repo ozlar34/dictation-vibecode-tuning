@@ -1,15 +1,15 @@
 {
-  "_comment": "Drift manifest. cc-hygiene.py hashes the LIVE source files below and compares to these snapshot-time hashes. A mismatch means the local tooling changed and this repo snapshot is stale — re-sanitize + commit. Hashing the live sources (not the sanitized repo copies) is deliberate: sanitization deltas must not register as drift.",
-  "snapshot_date": "2026-06-14",
+  "_comment": "Drift manifest. cc-hygiene.py hashes the LIVE source files below and compares to these snapshot-time hashes. A mismatch means the local tooling changed and this repo snapshot is stale \u2014 re-sanitize + commit. Hashing the live sources (not the sanitized repo copies) is deliberate: sanitization deltas must not register as drift.",
+  "snapshot_date": "2026-07-08",
   "sources": {
-    "~/Scripts/voiceink-review.py": "8a41a4e709b1645909d573494426d90ff3c7debddd61357344c921c4fb4ff7b2",
+    "~/Scripts/voiceink-review.py": "772464f4da11928e0709681c201c9845ce8ba4b99113bd8714ec61f620e9319e",
     "~/Scripts/voiceink-model-ab.py": "74d1cebe77642990d357c145cc7885fa9debd0fc3f9ba7a26817e47f03ca7216",
-    "~/Scripts/voiceink-patch-vibe-prompt.py": "3416fca4b2bd916c75d30d97d0e0193cd22dbe6b92212dd760feea4f4b13b761",
-    "~/Library/LaunchAgents/com.user.ollama-host.plist": "3fa04d2767e75cd4678fe50d7e5b37afb93762ca2548ab380af192ad51c78595"
+    "~/Scripts/voiceink-apply-prompt.py": "c1d5937aa3b05a8aae7ec6fa2feb1a8e76fb90d22322f769cad67e1c6421b41b",
+    "~/Library/LaunchAgents/com.oguz.voiceink-llm.plist": "29c8384c76e64698a4d3d612fa52a1561566204bd25d29af431718a156630e51"
   },
   "prompt": {
     "domain": "com.prakashjoshipax.VoiceInk",
     "title": "Vibe Coding",
-    "sha256": "107b61516001b434c803755621bac829d62ae5f1d67995fa358de34249c52fa8"
+    "sha256": "2a532b6f492279499dbd8a8f83dd6174518a42652681adc3f6fa483bf035a71a"
   }
 }

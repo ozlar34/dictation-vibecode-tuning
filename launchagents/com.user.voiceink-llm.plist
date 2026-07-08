@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Dedicated llama-server (llama.cpp) for the VoiceInk AI-enhancement pass.
+
+        Runs gemma4-e4b permanently on :11435, kept isolated from any swap-on-demand
+        model pool (e.g. llama-swap on :11434) so no other model request can ever
+        evict it. VoiceInk's Custom provider points here, so enhancement is always
+        served by a model that is already resident.
+
+        VoiceInk config:
+            API Endpoint URL: http://127.0.0.1:11435/v1/chat/completions
+            Model Name:       gemma4-e4b
+
+        Two flags carry most of the weight (see the README "Findings"):
+          --mlock         pin the mmap'd weights in RAM so they survive sleep/wake
+                          and never re-fault from disk on the first post-wake dictation
+          --reasoning off suppress gemma4's thinking-token generation entirely. This
+                          is server-side and unconditional; the per-request
+                          {"thinking":false} kwarg does NOT stop generation, it only
+                          reroutes the tokens to reasoning_content. Without this the
+                          model silently "thinks" before every reply and enhancement
+                          crawls.
+        --ctx-size 8192 / --parallel 1: single-user; the Vibe Coding prompt alone is
+        ~1100-2000 tokens, so a smaller context caused context-exceeded errors.
+
+        Paths below use ~ for your home directory — launchd does NOT expand ~, so
+        replace each ~ with your absolute home path before loading this.
+    -->
+    <key>Label</key>
+    <string>com.user.voiceink-llm</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>~/.local/bin/llama-server</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>11435</string>
+        <string>--model</string>
+        <string>~/models/gemma-4-E4B-it-Q4_K_M.gguf</string>
+        <string>-ngl</string>
+        <string>99</string>
+        <string>--jinja</string>
+        <string>--flash-attn</string>
+        <string>on</string>
+        <string>--cache-type-k</string>
+        <string>q8_0</string>
+        <string>--cache-type-v</string>
+        <string>q8_0</string>
+        <string>--ctx-size</string>
+        <string>8192</string>
+        <string>--parallel</string>
+        <string>1</string>
+        <string>--mlock</string>
+        <string>--reasoning</string>
+        <string>off</string>
+    </array>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>WorkingDirectory</key>
+    <string>/tmp</string>
+
+    <key>StandardOutPath</key>
+    <string>~/Library/Logs/com.user.voiceink-llm.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>~/Library/Logs/com.user.voiceink-llm.err</string>
+</dict>
+</plist>
