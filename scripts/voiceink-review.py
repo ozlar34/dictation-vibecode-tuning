@@ -49,7 +49,7 @@ SENTINEL = os.path.expanduser(
 )
 PROMPT_SCOPE = os.environ.get("VOICEINK_PROMPT_SCOPE", "Vibe Coding")
 LIVE_MODEL = os.environ.get("VOICEINK_MODEL", "gemma4:e4b")
-PROMPT_VERSION = os.environ.get("VOICEINK_PROMPT_VERSION", "v3.6")
+PROMPT_VERSION = os.environ.get("VOICEINK_PROMPT_VERSION", "v3.8")
 CORE_DATA_EPOCH = 978307200  # seconds between 1970-01-01 and 2001-01-01
 
 
@@ -103,7 +103,7 @@ def query_pairs(since_ts):
     try:
         rows = conn.execute(
             """
-            SELECT ZTIMESTAMP, ZTEXT, ZENHANCEDTEXT, ZPOWERMODENAME
+            SELECT ZTIMESTAMP, ZTEXT, ZENHANCEDTEXT, ZMODENAME
             FROM ZTRANSCRIPTION
             WHERE ZPROMPTNAME = ?
               AND ZENHANCEDTEXT IS NOT NULL

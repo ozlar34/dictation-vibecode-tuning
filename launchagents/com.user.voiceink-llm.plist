@@ -14,17 +14,52 @@
             API Endpoint URL: http://127.0.0.1:11435/v1/chat/completions
             Model Name:       gemma4-e4b
 
-        Two flags carry most of the weight (see the README "Findings"):
+        --ctx-size 8192 / --parallel 1: single-user; the Vibe Coding prompt alone is
+        ~1100-2000 tokens, so a smaller context caused context-exceeded errors.
+
+        FLAGS THAT CARRY THE WEIGHT (see the README "Findings"):
+
           --mlock         pin the mmap'd weights in RAM so they survive sleep/wake
                           and never re-fault from disk on the first post-wake dictation
+
           --reasoning off suppress gemma4's thinking-token generation entirely. This
                           is server-side and unconditional; the per-request
                           {"thinking":false} kwarg does NOT stop generation, it only
                           reroutes the tokens to reasoning_content. Without this the
                           model silently "thinks" before every reply and enhancement
                           crawls.
-        --ctx-size 8192 / --parallel 1: single-user; the Vibe Coding prompt alone is
-        ~1100-2000 tokens, so a smaller context caused context-exceeded errors.
+
+          --spec-type ngram-simple (n=3, m=32) — prompt-lookup speculative decoding.
+                          Enhancement is a near-copy task: most output tokens already
+                          appear verbatim in the prompt, so drafts looked up from the
+                          current context are accepted at a high rate. Measured 2.1x
+                          decode throughput (~65 -> ~135 tok/s) on novel dictations,
+                          with output BYTE-IDENTICAL to non-speculative decoding at
+                          temperature 0 — lossless, no quality trade.
+                          Sweep: n=3 beats n=2/4/5; m=32 plateaus (48/64 no better,
+                          8/16 worse).
+
+          --swa-full      gemma uses sliding-window attention; without this llama.cpp
+                          cannot restore SWA KV state, so any system-prompt switch logs
+                          "forcing full prompt re-processing due to lack of cache data"
+                          and re-ingests the whole prompt (~1.9s spikes). Matters if you
+                          switch prompts per app.
+
+        BENCHMARKING WARNING, learned the hard way: do NOT measure speculative decoding
+        by sending the same transcript N times and taking a median. `ngram-mod` keeps a
+        PERSISTENT cross-request n-gram store, so repeated inputs let it memorise its own
+        output — it looked 4x faster than baseline and is worth 0% on first-exposure
+        (i.e. real) text. `ngram-simple` builds its index from the current prompt only,
+        which is why it is the one that actually helps. Always benchmark with novel
+        transcripts, one exposure each, and normalise against a baseline measured in the
+        SAME round — ambient GPU load drifted ~2x between sequential runs here and
+        inverted the rankings outright.
+
+        KV cache is deliberately left at f16. q8_0 K/V measured SLOWER to generate
+        (1.48x vs 1.64x speedup on an identical spec config — dequant overhead outweighs
+        the bandwidth saving at this context size), and at ctx 8192 the memory saved is
+        irrelevant on a large-RAM machine. Do not re-add --cache-type-k/v without
+        re-benchmarking.
 
         Paths below use ~ for your home directory — launchd does NOT expand ~, so
         replace each ~ with your absolute home path before loading this.
@@ -46,10 +81,13 @@
         <string>--jinja</string>
         <string>--flash-attn</string>
         <string>on</string>
-        <string>--cache-type-k</string>
-        <string>q8_0</string>
-        <string>--cache-type-v</string>
-        <string>q8_0</string>
+        <string>--spec-type</string>
+        <string>ngram-simple</string>
+        <string>--spec-ngram-simple-size-n</string>
+        <string>3</string>
+        <string>--spec-ngram-simple-size-m</string>
+        <string>32</string>
+        <string>--swa-full</string>
         <string>--ctx-size</string>
         <string>8192</string>
         <string>--parallel</string>

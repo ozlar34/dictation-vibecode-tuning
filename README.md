@@ -21,7 +21,7 @@ are the point.
 |---|---|---|
 | Speech-to-text | Parakeet V2 (`parakeet-tdt-0.6b-v2`), on-device | ~0.09s, effectively free, never the bottleneck |
 | Enhancement | `gemma4-e4b` on a dedicated **llama-server** (llama.cpp), local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
-| Enhancement prompt | custom **"Vibe Coding"** v3.6, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
+| Enhancement prompt | custom **"Vibe Coding"** v3.8, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
 
 Everything runs on-device. No API keys, no per-token cost, no audio or text
 leaving the machine — which is the whole reason for doing the enhancement with a
@@ -30,9 +30,11 @@ local model instead of a cloud one.
 ## What's in here
 
 ```
-prompt/vibe-coding.md          the tuned v3.6 enhancement prompt + extract script
+prompt/vibe-coding.md          the tuned v3.8 enhancement prompt + extract script
 scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs ENHANCED pairs
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the enhancement layer
+scripts/voiceink-prompt-ab.py  controlled A/B of two prompts at a fixed model
+scripts/voiceink-server-ab.py  controlled A/B of llama-server flags (shadow server, see finding 5)
 launchagents/                  LaunchAgent running the dedicated, always-resident llama-server
 examples/                      illustrative: applying a new prompt programmatically
 docs/architecture.png          pipeline & tuning system diagram
@@ -40,7 +42,7 @@ docs/architecture.png          pipeline & tuning system diagram
 
 ## Pipeline
 
-![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.6 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
+![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.8 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
 
 > **Note:** `docs/architecture.png` still shows the earlier Ollama-based backend; the text diagram below and the findings reflect the current dedicated-llama-server setup.
 
@@ -58,7 +60,7 @@ docs/architecture.png          pipeline & tuning system diagram
                          │
                          ▼
           [Layer 2 — Enhancement: gemma4-e4b]   ◄── voiceink-model-ab.py
-              llama-server · local · Vibe Coding v3.6   (A/B harness)
+              llama-server · local · Vibe Coding v3.8   (A/B harness)
                 → ENHANCED text
                          │
                          ▼
@@ -137,8 +139,10 @@ causes:
 - **Sleep/swap re-fault.** After the machine sleeps, the mmap'd weights get paged
   out; the first post-wake dictation re-faults them from disk. Fix: `--mlock`,
   which pins the weights in RAM so they survive sleep/wake.
-- **Decode-bound long outputs.** At ~70 tok/s a 200+ token cleanup is genuinely
-  3-4s of generation — not a load stall, just work. Shorter is faster.
+- **Decode-bound long outputs.** At ~65 tok/s a 200+ token cleanup is genuinely
+  3-4s of generation — not a load stall, just work. This is the dominant term for
+  a long dictation (~89% of wall-clock), and it is the one that responds to
+  speculative decoding — see finding 5.
 - **Prefix-cache misses.** Injecting variable context *before* the stable system
   prompt busts the prefix cache; keep the long, fixed Vibe Coding prompt first.
 
@@ -160,6 +164,51 @@ not trading accuracy for a speedup you can't perceive.
 `scripts/voiceink-model-ab.py` is the harness that measured this —
 cold-load vs warm latency and tokens/sec per model, over a fixed set of real
 rows, with the live prompt held constant so the model is the only variable.
+
+### 5. Speculative decoding is nearly free here — and benchmarking it is booby-trapped
+
+Enhancement is a **near-copy task**: most output tokens already appear verbatim
+in the input transcript. That is the ideal case for *prompt-lookup* speculative
+decoding, which drafts candidate tokens from the current context instead of from
+a second draft model. Adding `--spec-type ngram-simple` (n=3, m=32) measured
+**2.1x decode throughput** (~65 → ~135 tok/s) on novel dictations. On a ~45s
+dictation that moved the enhancement pass from ~1.69s to ~0.84s median.
+
+It is also **lossless**, and that claim is checked rather than assumed: at
+temperature 0 the output is byte-identical to non-speculative decoding. A
+speculative decoder that changes output is broken, so this is a hard gate, not a
+nice-to-have.
+
+**The trap.** A different variant, `--spec-type ngram-mod`, measured ~4x and was
+shipped first. It was worth **0%**. `ngram-mod` keeps a *persistent cross-request*
+n-gram store, and the benchmark re-sent the same transcripts to get a median — so
+the server was allowed to memorise its own previous output. On first-exposure
+text (i.e. real dictation, which is never a repeat) it scored 99.5% of baseline.
+`ngram-simple` builds its index from the current prompt only, which is exactly
+why it survives contact with novel input.
+
+A second trap sat underneath the first: **ambient GPU load on the machine drifted
+~2x between sequential runs**, which aliased onto whichever config happened to run
+first and inverted the rankings outright.
+
+So the method matters more than the number. Three rules, now enforced by
+[`scripts/voiceink-server-ab.py`](scripts/voiceink-server-ab.py):
+
+1. **Shadow server.** Candidates run on a scratch port; the production server is
+   never reconfigured, so dictation keeps working during a sweep.
+2. **First exposure.** Every transcript is seen exactly once per config. This is
+   what kills the persistent-store artifact.
+3. **Same-round baseline.** Configs are round-robined and each is scored against
+   the baseline measured *in its own round*, so an ambient slow patch hits
+   baseline and candidate equally and cancels out.
+
+Two smaller results from the same sweep: `--swa-full` is required because gemma
+uses sliding-window attention — without it llama.cpp cannot restore SWA KV state,
+so any system-prompt switch logs `forcing full prompt re-processing due to lack of
+cache data` and re-ingests the entire prompt (~1.9s spikes). And **q8_0 KV cache
+made generation slower**, not faster (1.48x vs 1.64x on an identical spec config);
+the dequant overhead outweighs the bandwidth saving at this context size, so the
+cache is deliberately left at f16.
 
 ---
 

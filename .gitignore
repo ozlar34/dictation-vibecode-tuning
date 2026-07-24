@@ -7,3 +7,6 @@ results.json
 report.md
 # patch-script backups
 vibe-prompt-before-*.txt
+# wispr A/B test data (personal dictations)
+wispr-test-cases.json
+wispr-report.md
