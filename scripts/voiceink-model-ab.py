@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """voiceink-model-ab.py — controlled A/B of enhancement models at the Ollama
-layer. Replicates the "Vibe Coding" enhancement (live prompt pulled from
+layer.
+
+NOTE: this script predates the migration from Ollama to a dedicated llama-server
+(see the README's findings 2 and 3). It is kept as the instrument findings 2 and
+4 were actually measured with, and still targets Ollama's HTTP API — repoint it
+at your own backend before reusing it.
+ Replicates the "Vibe Coding" enhancement (live prompt pulled from
 VoiceInk's config) over a fixed set of real raw-STT rows, measuring cold-load vs
 warm latency + tokens/sec per model and dumping side-by-side outputs for
 accuracy judging.

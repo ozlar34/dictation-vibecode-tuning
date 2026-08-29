@@ -226,6 +226,8 @@ Its mere presence flips the model into treating narrative dictation as a command
 to be *restated*, so instead of cleaning "I told them X, and they asked me for Y,
 can you draft it?" it emits "I want you to draft Y for them." A Prose rule
 elsewhere in the prompt already forbade exactly this, and was being overridden.
+(That example is paraphrased to strip personal context; sentence count and
+structure are preserved — the measurement itself used the recorded original.)
 
 Two checks kill the obvious alternative explanations: a **neutral filler block of
 the same length** does not trigger it (so it is not context length or attention
@@ -235,9 +237,10 @@ not "one more section").
 **Two fixes that sound right were measured and rejected.**
 
 1. *Scope the offending section* — add a sentence telling the model those rules
-   apply only to actual commands. **Zero effect.** This is the same negative
-   carve-out failure documented in finding 1: a small model follows the
-   imperative and drops the exception.
+   apply only to actual commands. **Zero effect.** Any rule shaped "do X, but
+   leave Y alone" is guilty until tested at this model size: the model follows
+   the imperative and drops the exception. This one collapsed to "do X" exactly
+   as every previous carve-out in this loop has.
 2. *Show it the correct shape* — add a worked example of a narrative dictation
    cleaned correctly. It **overfit**: it fixed the constructed test case and
    **failed a real held-out dictation** pulled from the transcript store.
@@ -330,7 +333,11 @@ substantive lost. This is what the enhancement pass is *for*.
 4. To run the review loop: `python3 scripts/voiceink-review.py status` (config via
    env vars — see the script header).
 5. To A/B two models: `python3 scripts/voiceink-model-ab.py model-a model-b`
-   (set `VOICEINK_CASE_PKS` to row ids from your own store).
+   (set `VOICEINK_CASE_PKS` to row ids from your own store). **Note:** this
+   script predates the llama-server migration and still drives Ollama's HTTP
+   API — the model comparison behind findings 2 and 4 was run on that backend.
+   Kept as the instrument those findings were measured with; point it at your
+   own backend before reusing it.
 
 The scripts read VoiceInk's SwiftData store **read-only** and never write it.
 Paths and the review window are env-configurable; defaults reflect the reference
