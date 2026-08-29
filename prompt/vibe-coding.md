@@ -1,4 +1,4 @@
-# "Vibe Coding" enhancement prompt — v3.8
+# "Vibe Coding" enhancement prompt — v3.9
 
 This is the LLM enhancement prompt that runs over the raw STT transcript inside
 VoiceInk (Settings → Enhancement → custom prompt, with **"Use System Template"
@@ -10,7 +10,9 @@ It is the product of a multi-week tuning loop — see [`../README.md`](../README
 for the methodology and the failure modes each rule was written to fix. The
 `/clear` clause-drop rule in the Lists section, for example, exists because an
 earlier version collapsed *"Can you run slash clear, then show me the git
-status?"* down to a bare `/clear`.
+status?"* down to a bare `/clear`. The closing "every sentence appears in the
+output" clause is the v3.9 addition — see finding 6 in the README for why a
+*positive invariant* was the only thing that fixed it.
 
 The prompt lives in VoiceInk's SwiftData store and can only be edited in the GUI
 — never by writing `default.store`. Refresh this file from the live app with
@@ -42,5 +44,5 @@ OUTPUT: I'm reading a tweet about Opus 4.8 and there are some example prompts in
 RAW: I'd like you to check the logs, um, and see what's going on.
 OUTPUT: I'd like you to check the logs and see what's going on.
 
-Output nothing but the formatted text.
+Output nothing but the formatted text. Every sentence of the input appears in the output, in the original order.
 ```

@@ -21,7 +21,7 @@ are the point.
 |---|---|---|
 | Speech-to-text | Parakeet V2 (`parakeet-tdt-0.6b-v2`), on-device | ~0.09s, effectively free, never the bottleneck |
 | Enhancement | `gemma4-e4b` on a dedicated **llama-server** (llama.cpp), local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
-| Enhancement prompt | custom **"Vibe Coding"** v3.8, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
+| Enhancement prompt | custom **"Vibe Coding"** v3.9, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
 
 Everything runs on-device. No API keys, no per-token cost, no audio or text
 leaving the machine — which is the whole reason for doing the enhancement with a
@@ -30,7 +30,7 @@ local model instead of a cloud one.
 ## What's in here
 
 ```
-prompt/vibe-coding.md          the tuned v3.8 enhancement prompt + extract script
+prompt/vibe-coding.md          the tuned v3.9 enhancement prompt + extract script
 scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs ENHANCED pairs
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the enhancement layer
 scripts/voiceink-prompt-ab.py  controlled A/B of two prompts at a fixed model
@@ -42,7 +42,7 @@ docs/architecture.png          pipeline & tuning system diagram
 
 ## Pipeline
 
-![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.8 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
+![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.9 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
 
 > **Note:** `docs/architecture.png` still shows the earlier Ollama-based backend; the text diagram below and the findings reflect the current dedicated-llama-server setup.
 
@@ -60,7 +60,7 @@ docs/architecture.png          pipeline & tuning system diagram
                          │
                          ▼
           [Layer 2 — Enhancement: gemma4-e4b]   ◄── voiceink-model-ab.py
-              llama-server · local · Vibe Coding v3.8   (A/B harness)
+              llama-server · local · Vibe Coding v3.9   (A/B harness)
                 → ENHANCED text
                          │
                          ▼
@@ -209,6 +209,67 @@ cache data` and re-ingests the entire prompt (~1.9s spikes). And **q8_0 KV cache
 made generation slower**, not faster (1.48x vs 1.64x on an identical spec config);
 the dequant overhead outweighs the bandwidth saving at this context size, so the
 cache is deliberately left at f16.
+
+---
+
+### 6. A prompt section can hijack a rule it never mentions — and a substring test can't see it
+
+The prompt was silently **dropping whole sentences**. A three-sentence narrative
+dictation ending in a request came back as only the closing request; the two
+sentences of context in front of it were gone. Reproducible 3/3 at temperature 0,
+so not sampling noise — and it had been live for weeks.
+
+**The cause was not the rule you would guess.** Bisecting the prompt section by
+section: the culprit is the **"Commands and code" section, and its ~130-character
+header alone is enough to trigger it** — the body of the rules is not required.
+Its mere presence flips the model into treating narrative dictation as a command
+to be *restated*, so instead of cleaning "I told them X, and they asked me for Y,
+can you draft it?" it emits "I want you to draft Y for them." A Prose rule
+elsewhere in the prompt already forbade exactly this, and was being overridden.
+
+Two checks kill the obvious alternative explanations: a **neutral filler block of
+the same length** does not trigger it (so it is not context length or attention
+dilution), and neither the Lists nor the Examples sections trigger it (so it is
+not "one more section").
+
+**Two fixes that sound right were measured and rejected.**
+
+1. *Scope the offending section* — add a sentence telling the model those rules
+   apply only to actual commands. **Zero effect.** This is the same negative
+   carve-out failure documented in finding 1: a small model follows the
+   imperative and drops the exception.
+2. *Show it the correct shape* — add a worked example of a narrative dictation
+   cleaned correctly. It **overfit**: it fixed the constructed test case and
+   **failed a real held-out dictation** pulled from the transcript store.
+
+That second result is the transferable one. Constructed test cases alone would
+have shipped the wrong fix with a green board. Hold out real recorded dictations.
+
+**What actually worked was 74 characters** appended to the prompt's closing line —
+a positive, unconditional invariant rather than a scoped exception:
+
+```text
+Output nothing but the formatted text. Every sentence of the input appears in
+the output, in the original order.
+```
+
+**The regression gate was blind to all of this, structurally.** Controls were
+scored by checking that one substring survived enhancement. On this case the
+control's needle happened to sit *inside* the one sentence the model kept — so
+the gate scored a two-thirds truncation as a **pass**. Every single-substring
+control shares this shape: it proves a fragment survived, never that the rest of
+the transcript did.
+
+The fix is to make each control carry a **list** of needles that collectively span
+every content clause of the raw transcript, and pass only if **all** of them
+survive. Authoring rule: needles must not cross a sentence boundary, because the
+enhancer legitimately rewrites boundary punctuation. Re-checked in both
+directions afterwards — the corpus passes on the fixed prompt, and the *old*
+prompt now fails the case it used to pass, naming the clauses it dropped.
+
+**Generalised:** a regression test that asserts on presence can only catch
+corruption, never deletion. If the failure mode you care about is the model
+*dropping* content, the assertion has to be anchored to the whole input.
 
 ---
 
