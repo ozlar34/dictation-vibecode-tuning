@@ -38,13 +38,12 @@ scripts/voiceink-server-ab.py  controlled A/B of llama-server flags (shadow serv
 launchagents/                  LaunchAgent running the dedicated, always-resident llama-server
 examples/                      illustrative: applying a new prompt programmatically
 docs/architecture.png          pipeline & tuning system diagram
+docs/architecture.html         source for the diagram above (regen command in its header)
 ```
 
 ## Pipeline
 
-![Three-layer dictation pipeline: VoiceInk captures audio → Parakeet V2 STT produces a RAW transcript → gemma4-e4b on a local llama-server with the Vibe Coding v3.9 prompt produces ENHANCED text → voiceink-review.py reads RAW/ENHANCED pairs for the miss-taxonomy review loop](docs/architecture.png)
-
-> **Note:** `docs/architecture.png` still shows the earlier Ollama-based backend; the text diagram below and the findings reflect the current dedicated-llama-server setup.
+![Three-layer dictation pipeline: VoiceInk captures audio on Caps Lock → F20 → Parakeet V2 STT runs on-device and produces a RAW transcript → gemma-4-E4B-it-Q4_K_M, served as gemma4-e4b by a dedicated llama-server at 127.0.0.1:11435 under the com.user.voiceink-llm LaunchAgent, applies the Vibe Coding v3.9 prompt to produce ENHANCED text, which VoiceInk pastes into the active app → voiceink-review.py reads the RAW/ENHANCED pairs back out of default.store for the miss-taxonomy review loop](docs/architecture.png)
 
 <details>
 <summary>Text version</summary>

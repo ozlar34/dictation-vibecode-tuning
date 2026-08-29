@@ -1,0 +1,145 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+  Source for docs/architecture.png. Kept in-repo so the diagram is regenerable
+  instead of reverse-engineered. Must stay in sync with the ASCII pipeline in
+  README.md ("Text version"): same nodes, same edges, same labels.
+
+  Regenerate:
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless --disable-gpu --hide-scrollbars \
+      --screenshot=docs/architecture.png \
+      --window-size=1280,614 --force-device-scale-factor=2 \
+      docs/architecture.html
+-->
+<style>
+  :root{
+    --bg:#0d1117; --box:#161b22; --line:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --dim:#6e7681;
+    --green:#3fb950; --blue:#58a6ff; --orange:#d29922; --purple:#a371f7;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1280px;height:614px;background:var(--bg);overflow:hidden}
+  body{
+    font:13px/1.45 ui-sans-serif,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    color:var(--fg);
+    display:flex;flex-direction:column;align-items:center;
+    padding:26px 0 0;
+  }
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace}
+  .url{font-size:15px;color:var(--dim);letter-spacing:.02em}
+  h1{font-size:23px;font-weight:700;margin:7px 0 20px;letter-spacing:-.01em}
+
+  .stack{display:flex;flex-direction:column;align-items:center;gap:0}
+  .row{display:flex;justify-content:center;align-items:stretch;gap:26px}
+
+  .box{
+    background:var(--box);border:1.5px solid var(--line);border-radius:11px;
+    padding:12px 17px 13px;text-align:left;
+  }
+  .box h2{font-size:15px;font-weight:700;letter-spacing:-.01em;margin-bottom:5px}
+  .box .l{font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .box .l b{color:#c9d1d9;font-weight:600}
+  .box.orange{border-color:var(--orange)}
+  .box.blue{border-color:var(--blue)}
+  .box.green{border-color:var(--green)}
+  .box.purple{border-color:var(--purple)}
+
+  /* arrow */
+  .arrow{display:flex;flex-direction:column;align-items:center;height:34px;justify-content:center}
+  .arrow svg{display:block}
+  .arrow .cap{font-size:11.5px;color:var(--dim);margin-bottom:1px}
+
+  /* the two top boxes feed one merge point */
+  .merge{width:1280px;height:30px}
+
+  /* right-hand annotation rail */
+  .withside{display:flex;align-items:center;gap:20px}
+  .side{font-size:12px;color:var(--green);line-height:1.5;white-space:nowrap}
+  .side .t{color:var(--dim)}
+  .tick{width:26px;height:1.5px;background:var(--green);opacity:.55}
+  .spacer{width:190px}
+</style>
+
+<div class="url mono">github.com/ozlar34 · dictation-vibecode-tuning</div>
+<h1>Pipeline &amp; Tuning System</h1>
+
+<div class="stack">
+
+  <!-- top row: app + the always-resident server -->
+  <div class="row">
+    <div class="box orange" style="width:400px">
+      <h2 class="mono">VoiceInk</h2>
+      <div class="l">macOS audio capture · <b>Caps Lock → F20</b></div>
+      <div class="l">SwiftData store · pastes ENHANCED into the active app</div>
+    </div>
+    <div class="box" style="width:400px">
+      <h2 class="mono">LaunchAgent</h2>
+      <div class="l"><b>com.user.voiceink-llm</b></div>
+      <div class="l">dedicated llama-server, always resident</div>
+    </div>
+  </div>
+
+  <!-- merge into layer 1 -->
+  <div class="merge">
+    <svg width="1280" height="30" viewBox="0 0 1280 30">
+      <!-- legs drop from the centre of each top box (x=427 VoiceInk, x=853 LaunchAgent),
+           join on a rail, then a single arrow into Layer 1 at x=640 -->
+      <path d="M427 0 V14 M853 0 V14 M427 14 H853 M640 14 V22"
+            fill="none" stroke="#3fb950" stroke-width="1.6"/>
+      <path d="M640 30 l-4.5 -7 h9 z" fill="#3fb950"/>
+    </svg>
+  </div>
+
+  <!-- layer 1 -->
+  <div class="withside">
+    <div class="spacer"></div>
+    <div class="box blue" style="width:560px">
+      <h2 class="mono">Layer 1 — STT: Parakeet V2</h2>
+      <div class="l">on-device · ~0.09 s</div>
+      <div class="l">→ <b>RAW transcript</b></div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+
+  <div class="arrow">
+    <svg width="12" height="30" viewBox="0 0 12 30">
+      <path d="M6 0 V22" stroke="#3fb950" stroke-width="1.6" fill="none"/>
+      <path d="M6 30 l-4.5 -7 h9 z" fill="#3fb950"/>
+    </svg>
+  </div>
+
+  <!-- layer 2 -->
+  <div class="withside">
+    <div class="spacer"></div>
+    <div class="box orange" style="width:560px">
+      <h2 class="mono">Layer 2 — Enhancement: gemma4-e4b</h2>
+      <div class="l"><b>gemma-4-E4B-it-Q4_K_M</b> · llama-server · <b>127.0.0.1:11435</b></div>
+      <div class="l">--reasoning off · --spec-type ngram-simple · --swa-full · KV f16</div>
+      <div class="l">"Vibe Coding" v3.9 prompt → <b>ENHANCED text</b></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:9px;width:190px">
+      <div class="tick"></div>
+      <div class="side mono">voiceink-model-ab.py<br><span class="t">A/B harness (offline)</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <svg width="12" height="30" viewBox="0 0 12 30">
+      <path d="M6 0 V22" stroke="#3fb950" stroke-width="1.6" fill="none"/>
+      <path d="M6 30 l-4.5 -7 h9 z" fill="#3fb950"/>
+    </svg>
+  </div>
+
+  <!-- layer 3 -->
+  <div class="withside">
+    <div class="spacer"></div>
+    <div class="box green" style="width:560px">
+      <h2 class="mono">Layer 3 — Review</h2>
+      <div class="l"><b>voiceink-review.py</b> · reads RAW/ENHANCED pairs from default.store</div>
+      <div class="l">RAW vs ENHANCED · 3-layer miss taxonomy</div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+
+</div>
