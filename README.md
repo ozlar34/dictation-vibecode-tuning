@@ -35,6 +35,8 @@ scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs E
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the enhancement layer
 scripts/voiceink-prompt-ab.py  controlled A/B of two prompts at a fixed model
 scripts/voiceink-server-ab.py  controlled A/B of llama-server flags (shadow server, see finding 5)
+scripts/voiceink-ab-test.py    regression gate for prompt changes: targets must improve, controls must not break (finding 6)
+scripts/regression-cases.json  the gate's corpus — multi-needle controls + targets
 launchagents/                  LaunchAgent running the dedicated, always-resident llama-server
 examples/                      illustrative: applying a new prompt programmatically
 docs/architecture.png          pipeline & tuning system diagram
@@ -272,6 +274,27 @@ prompt now fails the case it used to pass, naming the clauses it dropped.
 **Generalised:** a regression test that asserts on presence can only catch
 corruption, never deletion. If the failure mode you care about is the model
 *dropping* content, the assertion has to be anchored to the whole input.
+
+**Update 2026-11-08 — the fix overfit too.** Publishing the gate meant swapping
+the recorded case for a paraphrase, and the paraphrase failed. Then I bisected
+it with one-phrase swaps on the recorded original, all on the same live v3.9
+prompt, at temperature 0:
+
+| Change to the recorded dictation | Result |
+|---|---|
+| none (the original) | all three sentences kept, 3/3 |
+| "he … him" → "they … them" | kept |
+| "this company" → "the side project" | kept |
+| "team lead" → "manager" | **first two sentences dropped** |
+| "our HR department" → "the people team" | **first two sentences dropped** |
+
+So the 74-character rule fixed *the case it was measured on*, not the failure.
+That is the same trap as rejected fix 2 above, hit by the fix that shipped:
+the held-out check was one real dictation, and one is not enough. The published
+corpus keeps the paraphrase as `ctl-trailing-question`. **It fails on the
+current prompt, on purpose**, so `--check-only` exits non-zero until a real fix
+lands. In A/B mode a proposed prompt has to pass it to count as an improvement.
+Open.
 
 ---
 

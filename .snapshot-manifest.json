@@ -6,7 +6,8 @@
     "~/Scripts/voiceink-model-ab.py": "74d1cebe77642990d357c145cc7885fa9debd0fc3f9ba7a26817e47f03ca7216",
     "~/Scripts/voiceink-apply-prompt.py": "c1d5937aa3b05a8aae7ec6fa2feb1a8e76fb90d22322f769cad67e1c6421b41b",
     "~/Library/LaunchAgents/com.oguz.voiceink-llm.plist": "a089d227d03becf7d8a93c46f10029ff6e0a7d7c157ee33abb9f2de8554c6d9f",
-    "~/Scripts/voiceink-server-ab.py": "ef5a892324fdc3615ca3b7c4023a95e04708925c3eb7d6200ad7dc22100d8173"
+    "~/Scripts/voiceink-server-ab.py": "ef5a892324fdc3615ca3b7c4023a95e04708925c3eb7d6200ad7dc22100d8173",
+    "~/Scripts/voiceink-ab-test.py": "74faaeebc176550fa48bab2cd43e65360dfc64f35739b3dfc750f9c2e046b3f1"
   },
   "prompt": {
     "domain": "com.prakashjoshipax.VoiceInk",

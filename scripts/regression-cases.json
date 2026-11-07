@@ -1,0 +1,150 @@
+{
+  "_doc": "Regression corpus for the VoiceInk enhancement prompt. Every prompt change is A/B'd against this before it ships (scripts/voiceink-ab-test.py). 'targets' must CHANGE; 'controls' must NOT break. A case passes only if EVERY string in its 'needles' list survives in the output. Authoring rule for controls: the needles must collectively span every content clause of 'raw', and must not cross a sentence boundary (the enhancer legitimately rewrites boundary punctuation). Every new prompt rule adds its own controls here — especially controls that attack the rule's negative carve-out, which is where 4B models fail. Seeded 2026-07-13 from the Claudeflare incident; migrated single 'needle' -> multi 'needles' on 2026-08-29 after the ctl-trailing-question blind spot (a lone substring cannot detect deletion of text it does not name).",
+  "controls": [
+    {
+      "id": "ctl-cloud-server",
+      "raw": "I want to spin up a cloud server on Hetzner and run the whole thing there instead of locally.",
+      "needles": [
+        "cloud server",
+        "Hetzner",
+        "run the whole thing there",
+        "instead of locally"
+      ],
+      "why": "2026-07-13: a cloud->Claude prompt rule rewrote this to 'Claude server'. Genuine infra 'cloud' must survive."
+    },
+    {
+      "id": "ctl-cloud-storage",
+      "raw": "The backups go to my iCloud drive, and the cloud storage is filling up fast.",
+      "needles": [
+        "backups go to my iCloud drive",
+        "cloud storage",
+        "filling up fast"
+      ],
+      "why": "2026-07-13: rewrote to 'Claude storage'."
+    },
+    {
+      "id": "ctl-cloudflare",
+      "raw": "We should put Cloudflare in front of the cloud deployment before we launch.",
+      "needles": [
+        "Cloudflare in front of the cloud deployment",
+        "before we launch"
+      ],
+      "why": "2026-07-13: emitted 'Claudeflare in front of the Claude deployment' — the rule chewed through a word boundary. Worst observed failure."
+    },
+    {
+      "id": "ctl-unfamiliar-token",
+      "raw": "Can you check what the codec output was for that run?",
+      "needles": [
+        "Can you check",
+        "codec",
+        "for that run"
+      ],
+      "why": "Guards the standing rule: never swap an unfamiliar token for a familiar-sounding word. 'codec' must not become 'Claude Code'."
+    },
+    {
+      "id": "ctl-no-answer",
+      "raw": "What is the capital of France?",
+      "needles": [
+        "What is the capital of France"
+      ],
+      "why": "Hard guardrail: the enhancer must CLEAN a question, never ANSWER it."
+    },
+    {
+      "id": "ctl-trailing-question",
+      "raw": "I told my manager about the side project and that we're starting it. and they asked me to write up a short explanation of what it is, to send it to the people team. Can you draft me a text for that?",
+      "needles": [
+        "I told my manager about the side project",
+        "starting it",
+        "asked me to write up a short explanation of what it is",
+        "send it to the people team",
+        "draft me a text"
+      ],
+      "why": "2026-06-30: the model dropped this trailing question in the wild. 2026-08-29: the MIRROR failure — dropping the body and keeping only the trailing question — reproduced 3/3 at temp 0 on the then-live prompt, and the single needle 'draft me a text' scored it PASS. That blind spot is why this corpus is multi-needle. Fixed by the +74-char closing rule; all five clauses must now survive. (Raw text paraphrased for publication to strip personal context; sentence count, clause count and structure match the recorded original — see README finding 6.) 2026-11-08: KNOWN FAILING on prompt v3.9 — the +74-char rule passes the recorded original but not this paraphrase (README finding 6, update). Kept in on purpose."
+    },
+    {
+      "id": "ctl-not-a-list",
+      "raw": "Can you go ahead and check the logs and then tell me what you find?",
+      "needles": [
+        "Can you go ahead and check the logs",
+        "tell me what you find"
+      ],
+      "why": "A single instruction is never a list, and lead-in phrases must survive verbatim."
+    },
+    {
+      "id": "ctl-prose-not-symbolized",
+      "raw": "The value equals five, so we should be fine.",
+      "needles": [
+        "equals five",
+        "we should be fine"
+      ],
+      "why": "Spoken punctuation is rendered literally ONLY inside a command/path/identifier — never in plain prose."
+    },
+    {
+      "id": "ctl-like-meaningful",
+      "raw": "It's something like a wrapper around the API, if that makes sense.",
+      "needles": [
+        "something like a wrapper",
+        "around the API",
+        "if that makes sense"
+      ],
+      "why": "2026-07-24: dropped the 'like'-filler-removal rule (Claudeflare-shaped carve-out, untested). Meaningful 'like' must survive now that removal is gone entirely."
+    },
+    {
+      "id": "ctl-list-explicit-cue",
+      "raw": "I need a numbered list: fix the bug, add tests, and update the docs.",
+      "needles": [
+        "fix the bug",
+        "add tests",
+        "update the docs"
+      ],
+      "why": "2026-07-24: Lists rule reworded to a purely positive, cue-only trigger. An explicit 'numbered list' cue must still produce a list, not collapse to prose."
+    },
+    {
+      "id": "dev-flag-119",
+      "raw": "Show me what dash dash help prints for the build command.",
+      "needles": [
+        "--help",
+        "prints for the build command"
+      ],
+      "why": "2026-08-29: real dictation (default.store row 119). Spoken punctuation INSIDE a flag must render literally ('dash dash help' -> '--help') while the surrounding prose survives intact. Pairs with ctl-prose-not-symbolized, which guards the opposite direction."
+    },
+    {
+      "id": "dev-slash-866",
+      "raw": "But my biggest thing is that I don't like the results that I'm getting from sort raindrop or slash triage.",
+      "needles": [
+        "biggest thing",
+        "sort raindrop",
+        "/triage"
+      ],
+      "why": "2026-08-29: real dictation (default.store row 866). Slash-command rendering ('slash triage' -> '/triage') must not eat the adjacent bare command name 'sort raindrop', and the narrative lead-in must survive."
+    },
+    {
+      "id": "dev-allcaps-1530",
+      "raw": "When I change CLAUDE.md, where do I make a note of it? That's not really a thing that I do.",
+      "needles": [
+        "CLAUDE.md",
+        "where do I make a note of it",
+        "not really a thing that I do"
+      ],
+      "why": "2026-08-29: real dictation (default.store row 1530). An ALL-CAPS filename must survive uncased, and the sentence AFTER the question must not be dropped — the truncation failure mode this corpus now exists to catch."
+    }
+  ],
+  "targets": [
+    {
+      "id": "tgt-p1-no-reorder-false-start",
+      "raw": "I'm reading a tweet about Opus 4.8 and there are some prompts example prompts in it to that I want to save somewhere.",
+      "needles": [
+        "example prompts in it"
+      ],
+      "why": "2026-07-24 P1: old example taught the model to reorder 'example prompts' -> 'prompt examples'. Fixed output must collapse the false start without reordering."
+    },
+    {
+      "id": "tgt-p3-no-list-without-cue",
+      "raw": "I need to fix the auth bug, add tests, and update the docs before I ship this.",
+      "needles": [
+        "fix the auth bug, add tests, and update the docs"
+      ],
+      "why": "2026-07-24 P3: old ambiguous 'two or more distinct items' rule could turn an uncued enumeration into a list. New rule requires an explicit cue; with none, this must stay one prose line."
+    }
+  ]
+}
