@@ -1,11 +1,11 @@
 {
   "_comment": "Drift manifest. cc-hygiene.py hashes the LIVE source files below and compares to these snapshot-time hashes. A mismatch means the local tooling changed and this repo snapshot is stale \u2014 re-sanitize + commit. Hashing the live sources (not the sanitized repo copies) is deliberate: sanitization deltas must not register as drift.",
-  "snapshot_date": "2026-08-29",
+  "snapshot_date": "2026-11-08",
   "sources": {
     "~/Scripts/voiceink-review.py": "5abe4e8e98b28d06530e487a596dcc6118c44d4af4319ecc588cc8d5032d45c4",
     "~/Scripts/voiceink-model-ab.py": "74d1cebe77642990d357c145cc7885fa9debd0fc3f9ba7a26817e47f03ca7216",
     "~/Scripts/voiceink-apply-prompt.py": "c1d5937aa3b05a8aae7ec6fa2feb1a8e76fb90d22322f769cad67e1c6421b41b",
-    "~/Library/LaunchAgents/com.oguz.voiceink-llm.plist": "557db6635e23d09c10a0f71cbf1ad00815e70276788fea864566dd5443c56e12",
+    "~/Library/LaunchAgents/com.oguz.voiceink-llm.plist": "a089d227d03becf7d8a93c46f10029ff6e0a7d7c157ee33abb9f2de8554c6d9f",
     "~/Scripts/voiceink-server-ab.py": "ef5a892324fdc3615ca3b7c4023a95e04708925c3eb7d6200ad7dc22100d8173"
   },
   "prompt": {
