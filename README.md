@@ -21,7 +21,7 @@ are the point.
 |---|---|---|
 | Speech-to-text | Parakeet V2 (`parakeet-tdt-0.6b-v2`), on-device | ~0.09s, effectively free, never the bottleneck |
 | Enhancement | `gemma4-e4b` on a dedicated **llama-server** (llama.cpp), local | punctuation / fillers / formatting cleanup, no cloud, no API cost |
-| Enhancement prompt | custom **"Vibe Coding"** v3.9, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
+| Enhancement prompt | custom **"Vibe Coding"** v3.10, system-template OFF | the actual tuned artifact ([`prompt/vibe-coding.md`](prompt/vibe-coding.md)) |
 
 Everything runs on-device. No API keys, no per-token cost, no audio or text
 leaving the machine — which is the whole reason for doing the enhancement with a
@@ -30,7 +30,7 @@ local model instead of a cloud one.
 ## What's in here
 
 ```
-prompt/vibe-coding.md          the tuned v3.9 enhancement prompt + extract script
+prompt/vibe-coding.md          the tuned v3.10 enhancement prompt + extract script
 scripts/voiceink-review.py     read-only reader of the SwiftData store: RAW vs ENHANCED pairs
 scripts/voiceink-model-ab.py   controlled A/B of enhancement models at the enhancement layer
 scripts/voiceink-prompt-ab.py  controlled A/B of two prompts at a fixed model
@@ -45,7 +45,7 @@ docs/architecture.html         source for the diagram above (regen command in it
 
 ## Pipeline
 
-![Three-layer dictation pipeline: VoiceInk captures audio on Caps Lock → F20 → Parakeet V2 STT runs on-device and produces a RAW transcript → gemma-4-E4B-it-Q4_K_M, served as gemma4-e4b by a dedicated llama-server at 127.0.0.1:11435 under the com.user.voiceink-llm LaunchAgent, applies the Vibe Coding v3.9 prompt to produce ENHANCED text, which VoiceInk pastes into the active app → voiceink-review.py reads the RAW/ENHANCED pairs back out of default.store for the miss-taxonomy review loop](docs/architecture.png)
+![Three-layer dictation pipeline: VoiceInk captures audio on Caps Lock → F20 → Parakeet V2 STT runs on-device and produces a RAW transcript → gemma-4-E4B-it-Q4_K_M, served as gemma4-e4b by a dedicated llama-server at 127.0.0.1:11435 under the com.user.voiceink-llm LaunchAgent, applies the Vibe Coding v3.10 prompt to produce ENHANCED text, which VoiceInk pastes into the active app → voiceink-review.py reads the RAW/ENHANCED pairs back out of default.store for the miss-taxonomy review loop](docs/architecture.png)
 
 <details>
 <summary>Text version</summary>
@@ -61,7 +61,7 @@ docs/architecture.html         source for the diagram above (regen command in it
                          │
                          ▼
           [Layer 2 — Enhancement: gemma4-e4b]   ◄── voiceink-model-ab.py
-              llama-server · local · Vibe Coding v3.9   (A/B harness)
+              llama-server · local · Vibe Coding v3.10  (A/B harness)
                 → ENHANCED text
                          │
                          ▼
@@ -291,10 +291,27 @@ prompt, at temperature 0:
 So the 74-character rule fixed *the case it was measured on*, not the failure.
 That is the same trap as rejected fix 2 above, hit by the fix that shipped:
 the held-out check was one real dictation, and one is not enough. The published
-corpus keeps the paraphrase as `ctl-trailing-question`. **It fails on the
-current prompt, on purpose**, so `--check-only` exits non-zero until a real fix
-lands. In A/B mode a proposed prompt has to pass it to count as an improvement.
-Open.
+corpus keeps the paraphrase as `ctl-trailing-question`.
+
+**Fixed in v3.10, by deleting text.** The Prose section said: *Keep lead-in
+phrases ("Go ahead and", "Can you", "I want you to") exactly.* The failing
+dictation ends with "Can you draft me a text for that?" Dropping the quoted
+examples, leaving `Keep lead-in phrases exactly.` (−45 chars), took the three
+variant controls from 0/3 to 3/3. All other controls held at 3/3. A held-out
+set of real dictations plus six unseen phrase swaps also held, and none of that
+set was used for tuning. My best guess at the mechanism: quoting "Can you" told
+the model that a "Can you…" sentence is the part worth keeping. The ablation
+supports this but does not prove it. Moving the Prose section last and renaming
+the Commands header both made things worse or did nothing.
+
+**The other lesson: temperature 0 does not make the result deterministic here.**
+llama-server reuses its prompt cache across requests, and the output depends on
+what came before. The v3.9 prompt passed 7 of 34 phrase swaps with a cold cache,
+and 34 of 34 when the cache already held 75% of the prompt. A fix that only
+changes the *end* of the prompt shares a long prefix with the old one. The gate
+then scores it in the friendly cache state. That would explain how the
+74-character fix passed and still did not hold. Evaluate prompt changes with
+the cache cold or controlled, not just at temperature 0.
 
 ---
 

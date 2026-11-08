@@ -59,7 +59,7 @@
         "send it to the people team",
         "draft me a text"
       ],
-      "why": "2026-06-30: the model dropped this trailing question in the wild. 2026-08-29: the MIRROR failure — dropping the body and keeping only the trailing question — reproduced 3/3 at temp 0 on the then-live prompt, and the single needle 'draft me a text' scored it PASS. That blind spot is why this corpus is multi-needle. Fixed by the +74-char closing rule; all five clauses must now survive. (Raw text paraphrased for publication to strip personal context; sentence count, clause count and structure match the recorded original — see README finding 6.) 2026-11-08: KNOWN FAILING on prompt v3.9 — the +74-char rule passes the recorded original but not this paraphrase (README finding 6, update). Kept in on purpose."
+      "why": "2026-06-30: the model dropped this trailing question in the wild. 2026-08-29: the MIRROR failure — dropping the body and keeping only the trailing question — reproduced 3/3 at temp 0 on the then-live prompt, and the single needle 'draft me a text' scored it PASS. That blind spot is why this corpus is multi-needle. Fixed by the +74-char closing rule; all five clauses must now survive. (Raw text paraphrased for publication to strip personal context; sentence count, clause count and structure match the recorded original — see README finding 6.) 2026-11-08: failed on v3.9 (the +74-char rule overfit the recorded original); passes on v3.10 after the quoted lead-in examples were removed (README finding 6, update)."
     },
     {
       "id": "ctl-not-a-list",
